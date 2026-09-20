@@ -22,7 +22,13 @@ class WindowsTheme {
     static SetWindowAttribute(GuiObj, DarkMode := True)
     {
         global DarkColors := Map("Background", "0x202020", "Controls", "0x404040", "Font", "0xE0E0E0")
-        global TextBackgroundBrush := DllCall("gdi32\CreateSolidBrush", "UInt", DarkColors["Background"], "Ptr")
+        ; 画刷被 WindowProc 长期引用，整个进程只创建一次；每次调用都新建会泄漏 GDI 句柄
+        static BrushCreated := 0
+        if !(BrushCreated)
+        {
+            global TextBackgroundBrush := DllCall("gdi32\CreateSolidBrush", "UInt", DarkColors["Background"], "Ptr")
+            BrushCreated := 1
+        }
 
         if (VerCompare(A_OSVersion, "10.0.17763") >= 0)
         {

@@ -15,7 +15,7 @@ Modified by wfwuestc, 2026：项目更名 AHK2ManagerEx（子文件夹结构支�
 
 ;@Ahk2Exe-SetName AHK2ManagerEx
 ;@Ahk2Exe-SetDescription AHK2ManagerEx
-;@Ahk2Exe-SetVersion 0.0.1
+;@Ahk2Exe-SetVersion 0.0.2
 ;@Ahk2Exe-SetCopyright Jacques Yip (2022-2023) / modified by wfwuestc (2026)
 ;@Ahk2Exe-SetOrigFilename AHK2ManagerEx.exe
 ;@Ahk2Exe-SetMainIcon icons\main_light.ico
@@ -26,29 +26,34 @@ Modified by wfwuestc, 2026：项目更名 AHK2ManagerEx（子文件夹结构支�
 
 #Include <Array>
 #Include <WindowsTheme>
-#Include <JSON>
 #Include <ConfMan>
 
 SetWorkingDir A_ScriptDir
 #SingleInstance Force
-SetTitleMatchMode 1
+; 3 = 精确匹配。脚本窗口标题只有两种形态：「完整路径 - AutoHotkey」或「裸文件名 - AutoHotkey」；
+; 用前缀匹配（旧值 1）会让不同目录里的同名脚本互相命中，导致 CloseTask/RestartTask 关错窗口
+SetTitleMatchMode 3
 DetectHiddenWindows 1
 FileEncoding "UTF-8-RAW"
 
-FolderCheckList := ["lang", "scripts", "icons", "lib"]
-for item in FolderCheckList
+for item in ["lang", "scripts"] {
     If !FileExist(A_ScriptDir "\" item) {
         DirCreate(A_ScriptDir "\" item)
     }
+}
 
-FileInstall(".\lang\en_us.ini", ".\lang\en_us.ini", 1)
-FileInstall(".\lang\zh_cn.ini", ".\lang\zh_cn.ini", 1)
+; 语言包缺失时才解出，避免覆盖用户自己改过的文案（源码运行时文件本来就在，两个判断都不触发）
+If !FileExist(".\lang\en_us.ini") {
+    FileInstall(".\lang\en_us.ini", ".\lang\en_us.ini", 1)
+}
+If !FileExist(".\lang\zh_cn.ini") {
+    FileInstall(".\lang\zh_cn.ini", ".\lang\zh_cn.ini", 1)
+}
 
-Paths := EnvGet("PATH")
-EnvSet("PATH", A_ScriptDir "\bin`;" Paths)
 SplitPath A_ScriptName, , , , &appName
 
-global sysThemeMode := RegRead("HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme")
+; 读不到主题键（不支持深色模式的系统）按浅色处理
+global sysThemeMode := RegRead("HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 1)
 
 global CONF_PATH := A_ScriptDir "\setting.ini"
 CONF := ConfMan.GetConf(CONF_PATH)
@@ -57,14 +62,6 @@ CONF.Setting := {
     mode: 0
 }
 CONF.SCRIPTS := {}
-CONF.COUNTSDAEMON := {}
-CONF.COUNTSONCE := {}
-CONF.COUNTSTEMP := {}
-CONF.Setting.SetOpts("PARAMS")
-CONF.COUNTSDAEMON.SetOpts("PARAMS")
-CONF.COUNTSONCE.SetOpts("PARAMS")
-CONF.COUNTSTEMP.SetOpts("PARAMS")
-CONF.SCRIPTS.SetOpts("PARAMS")
 
 If !FileExist(CONF_Path) {
     FileAppend "", CONF_Path
@@ -74,18 +71,8 @@ If (FileRead(CONF_Path) = "") {
 }
 CONF.ReadFile()
 
-If !FileExist(A_ScriptDir "\lang") {
-    DirCreate(A_ScriptDir "\lang")
-}
-
-If (A_IsCompiled = 1) {
-    FileInstall(".\lang\en_us.ini", "lang\en_us.ini", 1)
-    FileInstall(".\lang\zh_cn.ini", "lang\zh_cn.ini", 1)
-}
-
 global typeEnum := Map("ONCE", 0, "TEMP", 1, "DAEMON", 2)
 
-; global scriptList := Array()
 ; scriptMap 的键是脚本的唯一 ID：相对 scripts 目录的路径去掉 .ahk
 ; 例如根目录的 "Obsidian"、子目录的 "EverythingToolbar\Everything_Toolbar"
 global scriptMap := Map()
@@ -94,33 +81,31 @@ global scriptMap := Map()
 global ignoredScriptList := Array()
 global ignoredMenu := Menu()
 
-unOpenScriptListTemp := Array()
-unOpenScriptListOnce := Array()
-unOpenScriptListDaemon := Array()
-
-OpenScriptListTemp := Array()
-OpenScriptListDaemon := Array()
+; #Include 目标解析缓存：绝对路径 → { mtime, targets }
+; 按修改时间失效，避免每次重新加载都把整个 scripts 目录重读一遍
+global includeCache := Map()
 
 global langMenu := Menu()
 global startMenu := Menu()
 global restartMenu := Menu()
 global closeMenu := Menu()
 
+; 进程管理器窗口，第一次打开时建好，之后复用
+global pmGui := ""
+global pmLV := ""
+
 WindowsTheme.SetAppMode(!sysThemeMode)
 
-if (A_Args.Length > 0) {
-    switch A_Args[1], false {
-        case "mode":
-            switch A_Args[2], false {
-                case "sc":
-                    CONF.Setting.mode := 1
-                    CONF.WriteFile()
-                    ChangeToSCMode()
-                case "char":
-                    CONF.Setting.mode := 0
-                    CONF.WriteFile()
-                default:
-            }
+; 需要两个参数：mode sc / mode char；少一个参数时不处理，避免 A_Args 越界
+if (A_Args.Length > 1 && A_Args[1] = "mode") {
+    switch A_Args[2], false {
+        case "sc":
+            CONF.Setting.mode := 1
+            CONF.WriteFile()
+            ChangeToSCMode()
+        case "char":
+            CONF.Setting.mode := 0
+            CONF.WriteFile()
         default:
     }
 }
@@ -133,37 +118,37 @@ CreateTrayMenu()
 CreateMenu()
 
 OpenAllTask()
+RegisterMouseShortcuts()
 
 Persistent
 Return
 
 ; --------------------- SHORTCUTS --------------------------
 
-; Ctrl + Alt + LButton, 启动
-^!LButton:: {
-    startMenu.Show
-    Return
-}
-
-; Ctrl + Alt + RButton, 关闭
-^!RButton:: {
-    closeMenu.Show
-    Return
-}
-
-; Ctrl + Alt + MButton, 重启
-^!MButton:: {
-    restartMenu.Show
-    Return
-}
-
 ; Win + Shift + R, 重新加载
 #+r:: ReloadTray
+
+; Ctrl + Alt + 鼠标三键直达三个菜单。这三个组合会挂全局鼠标钩子，
+; 不想被占用就在 setting.ini 的 [Setting] 段加 hotkeys=0（改完重启生效）。
+RegisterMouseShortcuts() {
+    if (IniRead(CONF_PATH, "Setting", "hotkeys", 1) + 0 != 0) {
+        Hotkey "^!LButton", (*) => startMenu.Show()
+        Hotkey "^!RButton", (*) => closeMenu.Show()
+        Hotkey "^!MButton", (*) => restartMenu.Show()
+    }
+}
 
 ; --------------------- MENU EVENT RESPONSE --------------------------
 LoadScript(mode) {
     global
+    ; 先把磁盘配置读回内存：后面一律读 CONF 对象即可 ——
+    ; 既不用每脚本一次整文件 IniRead，也不会有"内存值/文件值"两套真相（手改 setting.ini 也能即时生效）
+    CONF.ReadFile()
+
     scripts := ScanScripts()
+
+    ; 重建前先清空：否则磁盘上已删除/改名的脚本会留在菜单里，点下去就是「文件不存在」
+    scriptMap := Map()
 
     ; 收集被忽略的附加脚本，供托盘菜单只读展示（[Setting] showIgnored=1 时打开）
     ignoredScriptList := Array()
@@ -185,7 +170,7 @@ LoadScript(mode) {
         }
 
         for , scriptItem in scripts {
-            if (!(DetectConfig("SCRIPTS", scriptItem.id))) {
+            if (!(CONF.SCRIPTS.Has(scriptItem.id))) {
                 CONF.SCRIPTS.%scriptItem.id% := 0
             }
         }
@@ -199,9 +184,6 @@ LoadScript(mode) {
         }
         for , scriptName in stale {
             CONF.SCRIPTS.Delete(scriptName)
-            try CONF.COUNTSDAEMON.Delete(scriptName)
-            try CONF.COUNTSONCE.Delete(scriptName)
-            try CONF.COUNTSTEMP.Delete(scriptName)
         }
 
         for scriptName, scriptType in CONF.SCRIPTS {
@@ -212,48 +194,16 @@ LoadScript(mode) {
             scriptTypeNum := scriptType + 0
             running := IsScriptRunning(scriptItem.relPath, scriptItem.fileName)
 
-            if (scriptTypeNum = typeEnum["DAEMON"]) {
-                if (!(DetectConfig("COUNTSDAEMON", scriptName))) {
-                    once := IniRead(CONF_PATH, "COUNTSONCE", scriptName, 0)
-                    temp := IniRead(CONF_PATH, "COUNTSTEMP", scriptName, 0)
-                    CONF.COUNTSDAEMON.%scriptName% := (once > temp) ? once : temp
-                }
-                if (IniRead(CONF_PATH, "COUNTSONCE", scriptName, -1) >= 0) {
-                    CONF.COUNTSONCE.Delete(scriptName)
-                }
-                if (IniRead(CONF_PATH, "COUNTSTEMP", scriptName, -1) >= 0) {
-                    CONF.COUNTSTEMP.Delete(scriptName)
-                }
-                CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, scriptItem.displayName, scriptTypeNum, running, A_Index)
-            } else if (scriptTypeNum = typeEnum["TEMP"]) {
-                if (!(DetectConfig("COUNTSTEMP", scriptName))) {
-                    daemon := IniRead(CONF_PATH, "COUNTSDAEMON", scriptName, 0)
-                    once := IniRead(CONF_PATH, "COUNTSONCE", scriptName, 0)
-                    CONF.COUNTSTEMP.%scriptName% := (daemon > once) ? daemon : once
-                }
-                if (IniRead(CONF_PATH, "COUNTSDAEMON", scriptName, -1) >= 0) {
-                    CONF.COUNTSDAEMON.Delete(scriptName)
-                }
-                if (IniRead(CONF_PATH, "COUNTSONCE", scriptName, -1) >= 0) {
-                    CONF.COUNTSONCE.Delete(scriptName)
-                }
-                CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, scriptItem.displayName, scriptTypeNum, running, A_Index)
-            } else {
-                if (!(DetectConfig("COUNTSONCE", scriptName))) {
-                    daemon := IniRead(CONF_PATH, "COUNTSDAEMON", scriptName, 0)
-                    temp := IniRead(CONF_PATH, "COUNTSTEMP", scriptName, 0)
-                    CONF.COUNTSONCE.%scriptName% := (daemon > temp) ? daemon : temp
-                }
-                if (IniRead(CONF_PATH, "COUNTSDAEMON", scriptName, -1) >= 0) {
-                    CONF.COUNTSDAEMON.Delete(scriptName)
-                }
-                if (IniRead(CONF_PATH, "COUNTSTEMP", scriptName, -1) >= 0) {
-                    CONF.COUNTSTEMP.Delete(scriptName)
-                }
+            ; 菜单名与字符模式保持一致：都去掉 ! / + 前缀，否则同一脚本换模式后名字会多个符号
+            ; （注意别叫 menuLabel —— AHK 标识符大小写不敏感，会和函数 MenuLabel 撞名）
+            displayLabel := StripPrefix(scriptItem.displayName)
+            if (scriptTypeNum = typeEnum["ONCE"]) {
                 ; ONCE 脚本正在运行时不出现在菜单里，沿用旧行为
                 if (!running) {
-                    CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, scriptItem.displayName, scriptTypeNum, 0, A_Index)
+                    CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, displayLabel, scriptTypeNum, 0)
                 }
+            } else {
+                CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, displayLabel, scriptTypeNum, running)
             }
         }
         CONF.WriteFile()
@@ -263,7 +213,7 @@ LoadScript(mode) {
             if (scriptItem.isIgnore) {
                 continue
             }
-            CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, StripPrefix(scriptItem.displayName), ScriptTypeByPrefix(scriptItem.fileName), IsScriptRunning(scriptItem.relPath, scriptItem.fileName), A_Index)
+            CreateTaskInfo(scriptItem.id, scriptItem.relPath, scriptItem.folder, StripPrefix(scriptItem.displayName), ScriptTypeByPrefix(scriptItem.fileName), IsScriptRunning(scriptItem.relPath, scriptItem.fileName))
         }
     }
 }
@@ -280,9 +230,8 @@ OpenTask(id, *) {
 
 RestartTask(id, *) {
     scriptItem := scriptMap[id]
-    if (title := ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName)) {
-        WinClose(title)
-    }
+    ; 先等旧实例退干净再启动，否则慢退出的脚本会和新实例并存
+    CloseScriptWindow(ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName))
     RunScript(scriptItem.relPath)
     UpdateTaskStatus(id, 1)
     return
@@ -290,10 +239,10 @@ RestartTask(id, *) {
 
 CloseTask(id, *) {
     scriptItem := scriptMap[id]
-    if (title := ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName)) {
-        WinClose(title)
+    ; 只有确认窗口真的关掉了才改状态；否则菜单会显示"已关闭"但进程还在
+    if (CloseScriptWindow(ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName))) {
+        UpdateTaskStatus(id, 0)
     }
-    UpdateTaskStatus(id, 0)
     RecreateMenu()
     return
 }
@@ -313,16 +262,16 @@ OpenAllTask(*) {
 CloseAllTask(*) {
     for id, scriptItem in scriptMap {
         If (scriptItem.status = 1) {
-            if (title := ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName)) {
-                WinClose(title)
+            ; 退出流程里每个脚本只等 600ms，脚本多时不至于拖很久
+            if (CloseScriptWindow(ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName), 600)) {
+                UpdateTaskStatus(id, 0)
             }
-            UpdateTaskStatus(id, 0)
         }
     }
     RecreateMenu()
 }
 
-CreateTaskInfo(id, relPath, folder, displayName, type, status := 0, index := 0) {
+CreateTaskInfo(id, relPath, folder, displayName, type, status := 0) {
     SplitPath relPath, &fileName
     scriptObj := Object()
     scriptObj.id := id
@@ -332,7 +281,6 @@ CreateTaskInfo(id, relPath, folder, displayName, type, status := 0, index := 0) 
     scriptObj.displayName := displayName
     scriptObj.scriptType := type
     scriptObj.status := status
-    scriptObj.index := index
     scriptMap[id] := scriptObj
     return scriptObj
 }
@@ -344,95 +292,132 @@ UpdateTaskStatus(id, status := 1) {
 }
 
 ProManager(*) {
-    WmiInfo := GetWMI("AutoHotkey.exe")
-    ShowIndex := 0
-    PMGui := Gui()
-    WindowsTheme.SetWindowAttribute(PMGui, !sysThemeMode)
-    PMGui.SetFont("s9", "Arial")
-    PMLV := PMGui.Add("ListView", "x2 y0 w760 h500", [lGUIIndex, lGUIPid, lGUIScriptname, lGUIMemory])
+    ; 不写 global 的话这两个赋值会创建局部变量，窗口复用就不生效了
+    global pmGui, pmLV
+    if (!IsObject(pmGui)) {
+        pmGui := Gui()
+        WindowsTheme.SetWindowAttribute(pmGui, !sysThemeMode)
+        pmGui.SetFont("s9", "Arial")
+        pmLV := pmGui.Add("ListView", "x2 y0 w760 h500", [lGUIIndex, lGUIPid, lGUIScriptname, lGUIMemory])
+        pmLV.ModifyCol()
+        pmLV.ModifyCol(2, "Integer")
+        pmLV.ModifyCol(3, "260")
+        pmGui.Title := "Process List"
+        WindowsTheme.SetWindowTheme(pmGui, !sysThemeMode)
+    }
+    pmLV.Delete()
     for id, scriptItem in scriptMap {
         If (scriptItem.status = 1) {
             title := ScriptWindowTitle(scriptItem.relPath, scriptItem.fileName)
             if (title = "") {
                 continue
             }
-            ShowIndex += 1
+            procId := ""
+            memory := ""
             try procId := WinGetPID(title)
-            try memory := GetProcessMemoryInfo(procId)
-            PMLV.Add(, ShowIndex, procId, scriptItem.relPath, memory)
+            if (procId != "") {
+                try memory := GetProcessMemoryInfo(procId)
+            }
+            ; ListView 没有 Count 属性，只有 GetCount() 方法；
+            ; 上面刚 Delete 过，所以行号就是 GetCount() + 1（从 1 开始）
+            pmLV.Add(, pmLV.GetCount() + 1, procId, scriptItem.relPath, memory)
         }
     }
-    PMLV.ModifyCol()
-    PMLV.ModifyCol(2, "Integer")
-    PMLV.ModifyCol(3, "260")
-    PMGui.Title := "Process List"
-    WindowsTheme.SetWindowTheme(PMGui, !sysThemeMode)
-    PMGui.Show
+    pmGui.Show
 }
 
 ShowTray(*) {
     A_TrayMenu.Show
 }
 
-Test(ItemName, ItemPos, MyMenu) {
-    MsgBox("You selected" ItemName)
+; 分组标题和只读清单项的占位回调，这些项都被禁用，点了不会有动作
+Noop(*) {
 }
 
 ChangeToSCMode(*) {
     prefixLen := StrLen(A_ScriptDir "\scripts\")
+
+    ; 必须先把清单收集完再改名：文件循环中途重命名会让同一个文件被枚举两次
+    ; （旧名一次、新名一次），新名那一遍没有 !/+ 前缀，会在下面的 else 分支里被误记成 DAEMON。
+    ; 循环里同时把目录也存下来，免得再依赖 A_LoopFileDir（循环变量出了循环就失效）。
+    files := Array()
     Loop Files A_ScriptDir "\scripts\*.ahk", "R" {
-        relPath := SubStr(A_LoopFilePath, prefixLen + 1)
+        files.Push({ path: A_LoopFilePath, dir: A_LoopFileDir })
+    }
+
+    skipped := Array()          ; 因重名而未改名的脚本，最后统一提示
+    for , f in files {
+        relPath := SubStr(f.path, prefixLen + 1)
         SplitPath relPath, &fileName, &folder, , &displayName
-        id := (folder = "") ? displayName : folder "\" displayName
         menuName := StripPrefix(displayName)
-        if (SubStr(fileName, 1, 1) = "!") {
-            CONF.SCRIPTS.%id% := 1
-            FileMove A_LoopFilePath, A_LoopFileDir . "\" menuName . ".ahk", true
-            CONF.WriteFile()
-        } else if (SubStr(fileName, 1, 1) = "+") {
-            CONF.SCRIPTS.%id% := 0
-            FileMove A_LoopFilePath, A_LoopFileDir . "\" menuName . ".ahk", true
-            CONF.WriteFile()
-        } else {
-            if (!(DetectConfig("SCRIPTS", id))) {
-                CONF.SCRIPTS.%id% := 2
+        ; 配置键必须用重命名之后的名字：LoadScript 按新名扫描，用旧名写进去会被当 stale 删掉
+        id := (folder = "") ? menuName : folder "\" menuName
+        first := SubStr(fileName, 1, 1)
+        if (first = "!" || first = "+") {
+            newPath := f.dir . "\" menuName . ".ahk"
+            ; 同目录里已存在改名后的文件（例如 !Foo.ahk 与 Foo.ahk 并存）→ 跳过。
+            ; 否则 FileMove 的覆盖参数会静默丢掉其中一个文件，这是本流程唯一的丢数据风险点。
+            if (FileExist(newPath)) {
+                skipped.Push(relPath)
+                continue
             }
+            ; 判断用内存里的 CONF 而不是 IniRead：本函数刚写进去的值必须能立刻被看到
+            CONF.SCRIPTS.%id% := (first = "!") ? 1 : 0
+            FileMove f.path, newPath, true
+        } else if (!(CONF.SCRIPTS.Has(id))) {
+            CONF.SCRIPTS.%id% := 2
         }
+    }
+    CONF.WriteFile()
+
+    if (skipped.Length > 0) {
+        msg := "以下脚本改名后与同目录已有文件重名，已跳过：`n`n"
+        for , p in skipped {
+            msg .= p "`n"
+        }
+        msg .= "`n请手动改名或删除其中一个后重试。"
+        MsgBox(msg, appName " · mode sc")
     }
 }
 
 SwitchLanguage(ItemName, ItemPos, MyMenu) {
     CONF.Setting.language := ItemName
+    CONF.WriteFile()          ; 立刻落盘：否则进程被强杀时语言选择会丢
     InitialLanguage()
     CreateLangMenu()
     CreateTrayMenu()
-    CreateMenu()
+    RecreateMenu()
 }
 
 InitialLanguage(*) {
     LANG_PATH := A_ScriptDir "\lang\" CONF.Setting.language ".ini"
 
-    global lTrayExit := IniRead(LANG_PATH, "Tray", "exit")
-    global lTrayReload := IniRead(LANG_PATH, "Tray", "reload")
-    global lTrayProcMan := IniRead(LANG_PATH, "Tray", "procman")
-    global lTrayLang := IniRead(LANG_PATH, "Tray", "lang")
-    global lTrayCloseAll := IniRead(LANG_PATH, "Tray", "closeall")
-    global lTrayClose := IniRead(LANG_PATH, "Tray", "close")
-    global lTrayRestart := IniRead(LANG_PATH, "Tray", "restart")
-    global lTrayStart := IniRead(LANG_PATH, "Tray", "start")
+    ; 每个读取都必须带默认值：IniRead 省略 Default 时，键 / 段 / 文件任一缺失都会抛 OSError，
+    ; 而语言菜单是按 lang\ 目录下的 *.ini 列出来的 —— 多一个杂散文件就能把界面点崩。
+    ; 缺键时回落到英文文案，至少界面还能用。
+    global lTrayExit := IniRead(LANG_PATH, "Tray", "exit", "Exit")
+    global lTrayReload := IniRead(LANG_PATH, "Tray", "reload", "Reload")
+    global lTrayProcMan := IniRead(LANG_PATH, "Tray", "procman", "Process Manager")
+    global lTrayLang := IniRead(LANG_PATH, "Tray", "lang", "Language")
+    global lTrayCloseAll := IniRead(LANG_PATH, "Tray", "closeall", "Close All")
+    global lTrayClose := IniRead(LANG_PATH, "Tray", "close", "Close")
+    global lTrayRestart := IniRead(LANG_PATH, "Tray", "restart", "Restart")
+    global lTrayStart := IniRead(LANG_PATH, "Tray", "start", "Start")
     global lTrayIgnored := IniRead(LANG_PATH, "Tray", "ignored", "Ignored Scripts")
 
-    global lGUIIndex := IniRead(LANG_PATH, "GUI", "index")
-    global lGUIMemory := IniRead(LANG_PATH, "GUI", "memory")
-    global lGUIPid := IniRead(LANG_PATH, "GUI", "pid")
-    global lGUIScriptname := IniRead(LANG_PATH, "GUI", "scriptname")
+    global lGUIIndex := IniRead(LANG_PATH, "GUI", "index", "Index")
+    global lGUIMemory := IniRead(LANG_PATH, "GUI", "memory", "Memory")
+    global lGUIPid := IniRead(LANG_PATH, "GUI", "pid", "PID")
+    global lGUIScriptname := IniRead(LANG_PATH, "GUI", "scriptname", "Script Name")
 }
 
 ReloadTray(*) {
     CreateLangMenu()
     LoadScript(CONF.Setting.mode)
     CreateTrayMenu()
-    CreateMenu()
+    ; 必须走 RecreateMenu：CreateMenu 只加不删，连续重新加载会把旧条目堆在菜单里，
+    ; 而旧条目绑定的脚本 ID 在重建后已经不存在了
+    RecreateMenu()
     OpenAllTask()
     Return
 }
@@ -493,17 +478,17 @@ CreateLangMenu(*) {
 }
 
 CreateMenu(*) {
-    startMenu.Add(lTrayStart, Test)
+    startMenu.Add(lTrayStart, Noop)
     startMenu.ToggleEnable(lTrayStart)
     startMenu.Default := lTrayStart
     startMenu.Add
 
-    closeMenu.Add(lTrayClose, Test)
+    closeMenu.Add(lTrayClose, Noop)
     closeMenu.ToggleEnable(lTrayClose)
     closeMenu.Default := lTrayClose
     closeMenu.Add
 
-    restartMenu.Add(lTrayRestart, Test)
+    restartMenu.Add(lTrayRestart, Noop)
     restartMenu.ToggleEnable(lTrayRestart)
     restartMenu.Default := lTrayRestart
     restartMenu.Add
@@ -515,12 +500,11 @@ CreateMenu(*) {
     OpenScriptListTemp := Array()
     OpenScriptListDaemon := Array()
 
-
+    ; 三段互斥：ONCE 只进「未运行」列表，写成分开的 if 会让 ONCE 脚本再被塞进 DAEMON 组、菜单里出现两次
     for id, scriptItem in scriptMap {
         if (scriptItem.scriptType = typeEnum["ONCE"]) {
             unOpenScriptListOnce.Push(id)
-        }
-        if (scriptItem.scriptType = typeEnum["TEMP"]) {
+        } else if (scriptItem.scriptType = typeEnum["TEMP"]) {
             If (scriptItem.status = 0) {
                 unOpenScriptListTemp.Push(id)
             } else {
@@ -555,18 +539,13 @@ RecreateMenu(*) {
 ; --------------------- MENU FUNCTION --------------------------
 
 
-AddMenuItem(list, status := 0, split := true, title := "") {
+AddMenuItem(list, status := 0, split := true) {
     if (list.Length < 1) {
         return
     }
-    list.sort("C")
     tree := BuildMenuTree(list)
 
     if (status = 1) {
-        if (title != "") {
-            restartMenu.Add(title, Test)
-            closeMenu.Add(title, Test)
-        }
         AddMenuTree(tree, restartMenu, RestartTask)
         AddMenuTree(tree, closeMenu, CloseTask)
         if (split = true) {
@@ -574,9 +553,6 @@ AddMenuItem(list, status := 0, split := true, title := "") {
             closeMenu.Add
         }
     } else {
-        if (title != "") {
-            startMenu.Add(title, Test)
-        }
         AddMenuTree(tree, startMenu, OpenTask)
         if (split = true) {
             startMenu.Add
@@ -598,7 +574,7 @@ AddMenuTree(node, targetMenu, callback) {
         AddMenuTree(node.Folders[name], submenu, callback)
     }
 
-    ; 按显示名排序（与旧版 list.sort("C") 一致），中间的 tab 只作为同名时的兜底分隔
+    ; 按显示名排序，中间的 tab 只作为同名时的兜底分隔
     sortKeys := Array()
     byKey := Map()
     for , scriptItem in node.Items {
@@ -621,7 +597,7 @@ AddMenuTree(node, targetMenu, callback) {
 AddIgnoredMenu(*) {
     ignoredScriptList.sort("C")
     for , relPath in ignoredScriptList {
-        ignoredMenu.Add(relPath, Test)
+        ignoredMenu.Add(relPath, Noop)
         ignoredMenu.Disable(relPath)
     }
 }
@@ -666,6 +642,20 @@ ScriptWindowTitle(relPath, fileName) {
 
 IsScriptRunning(relPath, fileName) {
     return ScriptWindowTitle(relPath, fileName) != ""
+}
+
+; 关闭脚本窗口并等它真正消失（最多 timeoutMs 毫秒），返回是否已关闭。
+; 不等的话，慢退出的脚本会与紧接着启动的新实例并存（重启场景最明显）。
+CloseScriptWindow(title, timeoutMs := 2000) {
+    if (title = "" || !WinExist(title)) {
+        return 1
+    }
+    WinClose(title)
+    deadline := A_TickCount + timeoutMs
+    while (WinExist(title) && A_TickCount < deadline) {
+        Sleep 50
+    }
+    return !WinExist(title)
 }
 
 ; 去掉文件名里的 ! / + 标记与可选序号（正则与旧版保持一致）
@@ -770,21 +760,8 @@ ScanScripts() {
 MarkIncludeScripts(scripts) {
     included := Map()
     for , item in scripts {
-        try content := FileRead(ScriptPath(item.relPath), "UTF-8")
-        catch {
-            continue
-        }
-        Loop Parse content, "`n", "`r" {
-            if !RegExMatch(A_LoopField, "i)^[ `t]*#Include(Again)?[ `t]+(.+?)[ `t]*$", &m) {
-                continue
-            }
-            t := RegExReplace(m.2, "\s+;.*$")     ; 去掉行尾注释
-            t := RegExReplace(t, "i)^\*i[ `t]+")  ; #Include *i FileName
-            t := Trim(t, " `t`"")
-            if (t = "" || InStr(t, "<") = 1 || InStr(t, "%") = 1) {
-                continue                          ; <Lib> 与含变量的写法交给 AHK 自己解析，这里不处理
-            }
-            for , hit in ResolveIncludePath(t, item) {
+        for , target in ReadIncludeTargets(item) {
+            for , hit in ResolveIncludePath(target, item) {
                 included[StrLower(NormalizePath(hit))] := 1
             }
         }
@@ -796,8 +773,99 @@ MarkIncludeScripts(scripts) {
     }
 }
 
-; 解析 #Include 的目标，返回命中的绝对路径数组（目录形式会展开成多个文件）。
-; 绝对路径直接用；相对路径先按「引用者所在目录」找，再退回 scripts 根目录与程序目录。
+; 读出一个脚本里的 #Include 目标（未解析的路径字符串）。
+; 结果按文件修改时间缓存 —— 重新加载时没改动过的脚本不会重读，脚本多了也不会卡。
+ReadIncludeTargets(item) {
+    fullPath := ScriptPath(item.relPath)
+    try mtime := FileGetTime(fullPath, "M")
+    catch {
+        return Array()
+    }
+    if (includeCache.Has(fullPath)) {
+        cached := includeCache[fullPath]
+        if (cached.mtime = mtime) {
+            return cached.targets
+        }
+    }
+    targets := ParseIncludeTargets(fullPath, item)
+    includeCache[fullPath] := { mtime: mtime, targets: targets }
+    return targets
+}
+
+; 编码兜底链：先按 UTF-8 读（带 BOM 的文件由 BOM 决定真实编码），
+; 一段 #Include 都没找到时，再依次试 UTF-16（带 BOM）、UTF-16-RAW（无 BOM）、系统 ANSI（中文机器上即 GBK）。
+; 不做兜底的话，GBK 存盘的脚本会被解成乱码 → 它引用的库文件漏过滤，而且完全不报错。
+ParseIncludeTargets(fullPath, item) {
+    for , enc in ["UTF-8", "UTF-16", "UTF-16-RAW", "CP0"] {
+        try content := FileRead(fullPath, enc)
+        catch {
+            continue
+        }
+        targets := ExtractIncludeTargets(content, item)
+        if (targets.Length > 0) {
+            return targets
+        }
+    }
+    return Array()
+}
+
+; 从脚本文本里抽出 #Include / #IncludeAgain 的目标
+ExtractIncludeTargets(content, item) {
+    targets := Array()
+    Loop Parse content, "`n", "`r" {
+        if !RegExMatch(A_LoopField, "i)^[ `t]*#Include(Again)?[ `t]+(.+?)[ `t]*$", &m) {
+            continue
+        }
+        t := RegExReplace(m.2, "\s+;.*$")     ; 去掉行尾注释
+        t := RegExReplace(t, "i)^\*i[ `t]+")  ; #Include *i FileName
+        t := Trim(t, " `t")
+        ; 参数允许用单/双引号包起来（文档明确允许），先剥掉再判断
+        ; 注意 SubStr 的负长度是"省略末尾 N 个字符"，剥一层引号用 -1
+        if (t != "") {
+            first := SubStr(t, 1, 1)
+            if ((first = Chr(34) || first = "'") && SubStr(t, -1) = first) {
+                t := SubStr(t, 2, -1)
+            }
+        }
+        t := ExpandIncludeVars(t, item)
+        if (t = "" || InStr(t, "<") = 1 || InStr(t, "%") = 1) {
+            continue                          ; <Lib> 与仍含未支持变量的写法交给 AHK 自己解析
+        }
+        targets.Push(t)
+    }
+    return targets
+}
+
+; 展开 #Include 里允许使用的内建变量（挑文档列出、实际会用到的那些）
+ExpandIncludeVars(target, item) {
+    if (!InStr(target, "%")) {
+        return target
+    }
+    scriptDir := A_ScriptDir "\scripts"
+    if (item.folder != "") {
+        scriptDir .= "\" item.folder
+    }
+    vars := Map(
+        "A_ScriptDir", scriptDir,
+        "A_LineFile", ScriptPath(item.relPath),
+        "A_WorkingDir", A_WorkingDir,
+        "A_AppData", A_AppData,
+        "A_MyDocuments", A_MyDocuments,
+        "A_ProgramFiles", A_ProgramFiles,
+        "A_Temp", A_Temp,
+        "A_WinDir", A_WinDir
+    )
+    for name, value in vars {
+        target := StrReplace(target, "%" name "%", value)
+    }
+    return target
+}
+
+; 解析 #Include 的目标，返回命中的绝对路径数组。
+; 绝对路径直接用；相对路径先按「引用者所在目录」找（文档规定的默认基准），再退回 scripts 根目录与程序目录。
+; 注意：AHK v2 里 #Include 跟目录名只是「改变后续 #Include / FileInstall 的基准目录」，
+; 并不包含该目录下的文件（那是 v1 的行为），所以这里不做目录展开 ——
+; 否则会把 AHK 其实从未包含的文件也一并隐藏掉。
 ResolveIncludePath(target, item) {
     candidates := Array()
     if IsAbsolutePath(target) {
@@ -812,14 +880,9 @@ ResolveIncludePath(target, item) {
 
     hits := Array()
     for , candidate in candidates {
-        if DirExist(candidate) {
-            Loop Files RTrim(candidate, "\") "\*.ahk" {
-                hits.Push(A_LoopFilePath)         ; #Include DirName\ 形式
-            }
-        } else if (FileExist(candidate) && !DirExist(candidate)) {
+        ; FileExist 对目录也返回非空（"D"），所以要显式排掉目录
+        if (FileExist(candidate) && !DirExist(candidate)) {
             hits.Push(candidate)
-        }
-        if (hits.Length > 0) {
             Break                                 ; 按优先级取第一个命中的基准路径
         }
     }
@@ -863,16 +926,6 @@ MenuLabel(nodeFolders, usedLabels, scriptItem) {
 }
 
 ; --------------------- FUNCTION --------------------------
-
-; 给定进程名称，返回该进程的所有信息
-GetWMI(ProcessName) {
-    objWMI := ComObjGet("winmgmts:\\.\root\cimv2")    ; 连接到WMI服务
-    StrSql := 'SELECT * FROM Win32_Process WHERE Name=""'
-    StrSql .= ProcessName
-    StrSql .= '""'
-    Info := objWMI.ExecQuery(StrSql)
-    Return Info
-}
 
 ; 给定进程PID，获取其内存消耗
 GetProcessMemoryInfo(PID) {
