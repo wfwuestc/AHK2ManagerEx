@@ -218,6 +218,18 @@ npm run build    # 编译到 build\，产出 AHK2ManagerEx.exe / AHK2ManagerEx.z
 AutoHotkey64.exe AHK2ManagerEx.ahk
 ```
 
+### 发布
+
+推 `vX.Y.Z` 标签会触发 GitHub Actions（`.github/workflows/main.yml`）：CI 跑的是同一个 `npm run build`，
+产物与本机完全一致 —— 只有 x64、不加 UPX 壳，文件名不带架构后缀。
+
+`tools\` 不进版本库，所以 CI 会自己下载工具链，版本固定在 workflow 顶部的 `env` 里
+（`AHK_VERSION` 基准文件、`AHK2EXE_VERSION` 编译器）。**本机 `tools\` 升级时这两个值要一起改**，
+否则 Release 上的产物就不是你本机验证过的那一套编出来的。
+
+不想发版但想验证 CI：在 Actions 页面手动 Run workflow —— 会跑完下载工具链和构建两步，
+Release 步骤因为不是 tag 会自动跳过。
+
 ## 常见问题
 
 **脚本放进去了，菜单里没有？**

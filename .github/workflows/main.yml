@@ -1,18 +1,24 @@
 name: Build
 
 on:
-  label: 
-    types:
-      - created
-      - edited
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  # 手动触发只跑到构建为止（下面 Release 步骤带 tag 条件），
+  # 用来验证工具链下载和 build.ps1 这两步，不会发布任何东西。
+  workflow_dispatch:
 
 # 新建仓库默认给 GITHUB_TOKEN 只读权限，Release 步骤会 403；
 # 这一步是 softprops/action-gh-release 创建 Release 的必需权限。
 permissions:
   contents: write
+
+env:
+  # 必须和本机 tools\ 里的工具链版本一致：基准文件 AutoHotkey64.exe 2.0.27、编译器 1.1.37.02a2。
+  # tools\ 在 .gitignore 里、CI 上取不到，所以下面一步现下载同样的两个包并还原成相同目录结构。
+  # 本机升级工具链时，这两个值一起改。
+  AHK_VERSION: 2.0.27
+  AHK2EXE_VERSION: 1.1.37.02a2
 
 jobs:
   build:
@@ -20,25 +26,52 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build with AHK v2
-        uses: nukdokplex/autohotkey-build@v0.1
-        with:
-          version: v2.0.2
-          x64: true
-          x86: true
-          compression: upx
-          in: ""
-          out: build
+
+      # 还原成本机 tools\ 的布局：tools\AutoHotkey64.exe + tools\Compiler\Ahk2Exe.exe，
+      # 这两个路径都在 build.ps1 的候选列表里，所以后面不用传任何环境变量。
+      # 最后两行读 VersionInfo 兼作自检：包结构一变就在这里失败，不会拖到 Release 才发现。
+      - name: Stage toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path tools\Compiler | Out-Null
+
+          $ahkZip = Join-Path $env:RUNNER_TEMP "AutoHotkey_${env:AHK_VERSION}.zip"
+          curl.exe -L --fail -sS -o $ahkZip "https://github.com/AutoHotkey/AutoHotkey/releases/download/v${env:AHK_VERSION}/AutoHotkey_${env:AHK_VERSION}.zip"
+          Expand-Archive -Path $ahkZip -DestinationPath "$env:RUNNER_TEMP\ahk" -Force
+          # 便携版 zip 里只有解释器，编译器要单独取（官方 UX\install-ahk2exe.ahk 也是这么做的）
+          Copy-Item "$env:RUNNER_TEMP\ahk\AutoHotkey64.exe" tools\AutoHotkey64.exe
+
+          $exeZip = Join-Path $env:RUNNER_TEMP "Ahk2Exe${env:AHK2EXE_VERSION}.zip"
+          curl.exe -L --fail -sS -o $exeZip "https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe${env:AHK2EXE_VERSION}/Ahk2Exe${env:AHK2EXE_VERSION}.zip"
+          Expand-Archive -Path $exeZip -DestinationPath tools\Compiler -Force
+          if (!(Test-Path tools\Compiler\Ahk2Exe.exe)) {
+            $found = Get-ChildItem tools\Compiler -Recurse -Filter Ahk2Exe.exe | Select-Object -First 1
+            if (!($found)) { throw 'Ahk2Exe.zip 里没有 Ahk2Exe.exe' }
+            Copy-Item $found.FullName tools\Compiler\Ahk2Exe.exe
+          }
+
+          (Get-Item tools\AutoHotkey64.exe).VersionInfo | Format-List FileVersion
+          (Get-Item tools\Compiler\Ahk2Exe.exe).VersionInfo | Format-List FileVersion
+
+      # 和本机完全同一条路径：同一个 build.ps1 的 prod 模式，版本号由 npm 从 package.json 取，
+      # 产物是 build\AHK2ManagerEx.exe + AHK2ManagerEx.zip + checksums.txt（只编 x64、不加壳）。
+      - name: Build
+        shell: pwsh
+        run: npm run build
+
       - name: Show build output
         shell: pwsh
         run: |
           ls build
+
       - name: Release
         uses: softprops/action-gh-release@v0.1.15
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            build/AHK2ManagerEx_x64.exe
-            build/AHK2ManagerEx_x86.exe
+            build/AHK2ManagerEx.exe
+            build/AHK2ManagerEx.zip
+            build/checksums.txt
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
