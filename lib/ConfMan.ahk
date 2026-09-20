@@ -139,7 +139,8 @@ class ConfMan
                     loop parse, sSectionContent, "`n"
                     {
                         ; Match oM.1 = KEY / oM.2 = VALUE
-                        if RegExMatch(A_LoopField, "S)^\s*(\w+)\s*\=\s*(.*)\s*$", &oM:=0)
+                        ; KEY 允许包含 \ . - 空格 等字符（子目录脚本用相对路径做键），只要不含 "=" 即可
+                        if RegExMatch(A_LoopField, "S)^\s*([^=\r\n]+?)\s*\=\s*(.*?)\s*$", &oM:=0)
                         {
                             if bNoKeys && !oRoot[sSectionName].Has(oM.1)
                                 continue

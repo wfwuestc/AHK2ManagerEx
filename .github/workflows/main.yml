@@ -9,6 +9,11 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
+# 新建仓库默认给 GITHUB_TOKEN 只读权限，Release 步骤会 403；
+# 这一步是 softprops/action-gh-release 创建 Release 的必需权限。
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -33,7 +38,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            build/AHK2Manager_x64.exe
-            build/AHK2Manager_x86.exe
+            build/AHK2ManagerEx_x64.exe
+            build/AHK2ManagerEx_x86.exe
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

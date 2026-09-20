@@ -1,10 +1,18 @@
 {
-    "name": "AHK2Manager",
-    "version": "0.1.2",
-    "description": "",
-    "main": "AHK2Manager.ahk",
+    "name": "AHK2ManagerEx",
+    "version": "0.0.1",
+    "description": "基于 AutoHotkey v2 的脚本管理器：统一启动/关闭/重启脚本，支持子文件夹分组与 #Include 附加脚本自动过滤",
+    "main": "AHK2ManagerEx.ahk",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/wfwuestc/AHK2ManagerEx.git"
+    },
+    "bugs": {
+        "url": "https://github.com/wfwuestc/AHK2ManagerEx/issues"
+    },
+    "homepage": "https://github.com/wfwuestc/AHK2ManagerEx#readme",
     "scripts": {
-        "start": "nodemon --exec AHK2Manager.ahk",
+        "start": "nodemon --exec AHK2ManagerEx.ahk",
         "build": "@powershell -NoProfile -ExecutionPolicy Unrestricted -Command ./build.ps1 %npm_package_version% prod %npm_package_name%",
         "test": "@powershell -NoProfile -ExecutionPolicy Unrestricted -Command ./build.ps1 %npm_package_version% dev %npm_package_name%",
         "version": "@powershell -NoProfile -ExecutionPolicy Unrestricted -Command ./build.ps1 %npm_package_version% version %npm_package_name%",
@@ -23,9 +31,17 @@
         ],
         "ext": "js, json, ahk, ini, conf"
     },
-    "keywords": [],
-    "author": "",
-    "license": "",
+    "keywords": [
+        "autohotkey",
+        "ahk",
+        "ahk2",
+        "autohotkey-v2",
+        "script-manager",
+        "tray-menu",
+        "launcher"
+    ],
+    "author": "wfwuestc",
+    "license": "GPL-2.0-only",
     "devDependencies": {
         "conventional-changelog-cli": "^3.0.0",
         "cz-conventional-changelog": "^3.3.0",

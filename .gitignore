@@ -4,6 +4,12 @@
 /scripts
 setting.ini
 
+# 本地构建工具链（Ahk2Exe 编译器与 x64 编译基准文件，不属于源码，不入库）
+/tools
+
+# 工作区私有数据（工具产生的本地记忆/缓存，不入库）
+.workbuddy/
+
 # Logs
 logs
 *.log
