@@ -23,7 +23,7 @@ $version = $args[0]
 $envName = $args[1]
 $appname = $args[2]
 $setversion = ";@Ahk2Exe-SetVersion " + $version
-$zipname = $appname + "_v" + $version
+$zipname = $appname
 
 Write-Host "App:" $appname
 Write-Host "Version:" $version
@@ -127,31 +127,31 @@ if ($envName -eq 'version') {
 if ($envName -eq 'prod') {
     Set-SourceVersion -Pattern "$cwd\*.ahk" -Replacement $setversion
 
-    Invoke-Compile -OutDir "$cwd\build" -OutSuffix "_x64"
+    Invoke-Compile -OutDir "$cwd\build" -OutSuffix ""
 
     $zip = "$cwd\build\$zipname.zip"
     if (Test-Path -LiteralPath $zip) {
         [System.IO.File]::Delete($zip)
     }
     try {
-        Compress-Archive -Path "$cwd\build\*_x64.exe" -DestinationPath $zip
+        Compress-Archive -Path "$cwd\build\$appname.exe" -DestinationPath $zip
     }
     catch {
         Write-Warning ("Compress-Archive 不可用（" + $_.Exception.Message + "），改用系统自带的 tar.exe")
     }
     if (!(Test-Path -LiteralPath $zip)) {
         # 退回 tar：Windows 10 1803+ 自带，-a 会按扩展名自动选择 zip 格式
-        $exe = Get-ChildItem "$cwd\build\*_x64.exe" -File | Select-Object -First 1
+        $exe = Get-ChildItem "$cwd\build\$appname.exe" -File | Select-Object -First 1
         & tar.exe -a -cf $zip -C "$cwd\build" $exe.Name
     }
     if (!(Test-Path -LiteralPath $zip)) {
         throw ("打包失败，" + $zip + " 没有生成")
     }
     $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-    ("$hash  $zipname.zip") | Set-Content -LiteralPath "$cwd\build\checksums_v$version.txt" -Encoding ascii
+    ("$hash  $zipname.zip") | Set-Content -LiteralPath "$cwd\build\checksums.txt" -Encoding ascii
     Write-Host ("打包完成:" + $zip)
 }
 
 if ($envName -eq 'dev') {
-    Invoke-Compile -OutDir "$cwd\test" -OutSuffix "_x64"
+    Invoke-Compile -OutDir "$cwd\test" -OutSuffix ""
 }

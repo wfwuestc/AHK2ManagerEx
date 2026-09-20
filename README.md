@@ -208,7 +208,7 @@ Copy-Item "<你的 AutoHotkey 目录>\AutoHotkey64.exe" tools\AutoHotkey64.exe  
 
 ```powershell
 npm run test     # 编译到 test\，用于本地验证
-npm run build    # 编译到 build\，产出 AHK2ManagerEx_x64.exe + zip + 校验和
+npm run build    # 编译到 build\，产出 AHK2ManagerEx.exe / AHK2ManagerEx.zip / checksums.txt
 ```
 
 不想编译的话，直接用解释器运行源码即可，只要保证 `lib\`、`icons\`、`lang\` 与
