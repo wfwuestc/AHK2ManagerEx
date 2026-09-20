@@ -19,7 +19,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Build with AHK v2
         uses: nukdokplex/autohotkey-build@v0.1
         with:
@@ -29,7 +29,7 @@ jobs:
           compression: upx
           in: ""
           out: build
-      - name: Do domething with builded scripts
+      - name: Show build output
         shell: pwsh
         run: |
           ls build

@@ -154,21 +154,34 @@ JSON 解析库、公共函数这类文件只是给别人 `#Include` 的，**不�
 | 唤起「重新运行」菜单 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>MButton</kbd> |
 | 重新加载管理器 | <kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> |
 
+前三个是鼠标组合键，会挂全局鼠标钩子。和其他软件冲突时，在 `setting.ini` 的 `[Setting]` 段
+加 `hotkeys=0` 再重启管理器即可关掉（<kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> 不受该开关影响）。
+
 ## 配置文件
 
 `setting.ini` 与程序同目录，首次运行自动生成：
 
 ```ini
 [Setting]
-language=zh_cn          ; 界面语言，对应 lang\ 下的文件名（en_us / zh_cn）
-mode=0                  ; 0 = 字符模式，1 = 版本控制模式
-showIgnored=0           ; 1 = 在托盘菜单显示被忽略的附加脚本清单（手动添加）
+language=zh_cn
+mode=0
+showIgnored=0
+hotkeys=1
 
-[SCRIPTS]               ; 仅版本控制模式使用：记录每个脚本的类型
-[COUNTSDAEMON]          ; 以下三段由程序自动维护，不需要手动改
-[COUNTSONCE]
-[COUNTSTEMP]
+[SCRIPTS]
 ```
+
+| 键 | 含义 |
+|---|---|
+| `language` | 界面语言，对应 `lang\` 下的文件名（`en_us` / `zh_cn`） |
+| `mode` | `0` = 字符模式，`1` = 版本控制模式 |
+| `showIgnored` | `1` = 在托盘菜单显示被忽略的附加脚本清单。**默认没有这一行，要自己加** |
+| `hotkeys` | `0` = 不注册下面那三个鼠标组合键。**默认也没有这一行，要自己加** |
+
+`[SCRIPTS]` 段仅版本控制模式使用，记录每个脚本的类型，由程序自动维护。
+
+> [!NOTE]
+> 这个文件每次保存都会被程序整体重写，手写的注释会被抹掉，所以说明写在上面这张表里而不是 ini 里。
 
 版本控制模式下，`[SCRIPTS]` 的键是脚本**相对 `scripts\` 的路径去掉扩展名**，所以
 子文件夹里的脚本也能各自独立配置：
@@ -181,12 +194,21 @@ EverythingToolbar\Everything_Toolbar=2
 
 ## 从源码构建
 
-需要先装好 [Ahk2Exe](https://www.autohotkey.com/docs/v2/Scripts.htm#ahk2exe)，
-并把 `build.ps1` 顶部的 `$ahkpath` 改成你自己的 AutoHotkey 安装目录：
+需要 [Ahk2Exe](https://www.autohotkey.com/docs/v2/Scripts.htm#ahk2exe)（AutoHotkey 官方编译器，**不随解释器分发**）。
+`build.ps1` 会按「环境变量 → 项目内 `tools\` → Program Files」的顺序自动找工具链，
+所以最省事的做法是把编译器放进项目里（`tools\` 已在 `.gitignore` 中，不会进版本库）：
+
+```powershell
+curl.exe -L --fail -o tools\Ahk2Exe.zip https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe1.1.37.02a2/Ahk2Exe1.1.37.02a2.zip
+Expand-Archive tools\Ahk2Exe.zip -DestinationPath tools\Compiler -Force
+Copy-Item "<你的 AutoHotkey 目录>\AutoHotkey64.exe" tools\AutoHotkey64.exe    # x64 编译基准
+```
+
+也可以不改目录，直接用环境变量指定：`AHK2EXE`（编译器路径）、`AHK_BASE_X64`（基准文件路径）。
 
 ```powershell
 npm run test     # 编译到 test\，用于本地验证
-npm run build    # 编译到 build\ 并打包 zip
+npm run build    # 编译到 build\，产出 AHK2ManagerEx_x64.exe + zip + 校验和
 ```
 
 不想编译的话，直接用解释器运行源码即可，只要保证 `lib\`、`icons\`、`lang\` 与
