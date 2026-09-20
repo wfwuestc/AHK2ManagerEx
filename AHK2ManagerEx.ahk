@@ -15,7 +15,7 @@ Modified by wfwuestc, 2026：项目更名 AHK2ManagerEx（子文件夹结构支�
 
 ;@Ahk2Exe-SetName AHK2ManagerEx
 ;@Ahk2Exe-SetDescription AHK2ManagerEx
-;@Ahk2Exe-SetVersion 0.0.4
+;@Ahk2Exe-SetVersion 0.0.5
 ;@Ahk2Exe-SetCopyright Jacques Yip (2022-2023) / modified by wfwuestc (2026)
 ;@Ahk2Exe-SetOrigFilename AHK2ManagerEx.exe
 ;@Ahk2Exe-SetMainIcon icons\main_light.ico

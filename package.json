@@ -1,6 +1,6 @@
 {
     "name": "AHK2ManagerEx",
-    "version": "0.0.4",
+    "version": "0.0.5",
     "description": "基于 AutoHotkey v2 的脚本管理器：统一启动/关闭/重启脚本，支持子文件夹分组与 #Include 附加脚本自动过滤",
     "main": "AHK2ManagerEx.ahk",
     "repository": {
