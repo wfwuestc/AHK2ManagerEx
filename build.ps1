@@ -147,7 +147,16 @@ if ($envName -eq 'prod') {
     if (!(Test-Path -LiteralPath $zip)) {
         throw ("打包失败，" + $zip + " 没有生成")
     }
-    $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+    # Get-FileHash 在 CI 的 Windows PowerShell 宿主里取不到（本机可以），直接用 .NET 算；
+    # 输出与 Get-FileHash 一样是大写十六进制
+    $stream = [System.IO.File]::OpenRead($zip)
+    try {
+        $hashBytes = ([System.Security.Cryptography.SHA256]::Create()).ComputeHash($stream)
+    }
+    finally {
+        $stream.Dispose()
+    }
+    $hash = ([System.BitConverter]::ToString($hashBytes)) -replace '-', ''
     ("$hash  $zipname.zip") | Set-Content -LiteralPath "$cwd\build\checksums.txt" -Encoding ascii
     Write-Host ("打包完成:" + $zip)
 }
